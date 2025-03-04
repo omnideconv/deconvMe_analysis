@@ -8,17 +8,17 @@ source('utils.R')
 
 #### Read processed data ####
 
-tpm_matrix <- readRDS('/nfs/data/NetfLID/methyldeconv_paper/processed_data/tpm.rds')
+tpm_matrix <- readRDS('data/tpm.rds')
 
 
-meta <- readRDS('/nfs/data/NetfLID/methyldeconv_paper/processed_data/meta.rds')
+meta <- readRDS('data/meta.rds')
 
 
-facs <- readRDS('/nfs/data/NetfLID/methyldeconv_paper/processed_data/facs.rds')
+facs <- readRDS('data/facs.rds')
 
 
-meth_matrix <- readRDS('/nfs/data/NetfLID/methyldeconv_paper/processed_data/meth.rds')
-unmeth_matrix <- readRDS('/nfs/data/NetfLID/methyldeconv_paper/processed_data/unmeth.rds')
+meth_matrix <- readRDS('data/meth.rds')
+unmeth_matrix <- readRDS('data/unmeth.rds')
 
 meth_matrix_complete <- meth_matrix[complete.cases(cbind(meth_matrix, unmeth_matrix)),]
 unmeth_matrix_complete <- unmeth_matrix[complete.cases(cbind(meth_matrix, unmeth_matrix)),]
