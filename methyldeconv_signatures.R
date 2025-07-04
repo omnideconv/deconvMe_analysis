@@ -1,7 +1,10 @@
 library(UpSetR)
 library(ComplexHeatmap)
+library(FlowSorted.Blood.450k)
 
 source('utils.R')
+setwd('/nfs/proj/omnideconv_benchmarking/omnideconv/methyldeconv_paper/')
+options(matrixStats.useNames.NA = "deprecated")
 
 #### load signatures ####
 
@@ -68,3 +71,33 @@ p_upset <- UpSet(mt,
 pdf('plots/final_versions/upset_basepairs.pdf', width = 1200, height = 400)
 p_upset
 dev.off()
+
+#### Extend with 2nd generation methods ####
+
+sig_scaden <- readRDS('deconv_results/omnideconv/scaden_sig.rds')
+sig_dwls <- readRDS('/nfs/data/omnideconv_benchmarking_clean/benchmark_results/results_main3/dwls_HaoCleaned-sampled_counts_altman-simulation_tpm_ct0_rep0/signature.rds')
+colnames(sig_dwls) <- c("T cells CD4", "T cells CD8", "ILC", "Monocytes", "NK cells", "Plasma cells", "Platelet", "Tregs", "Dendritic cells", "B cells" ,"p Dendritic cells")
+
+lt$DWLS <- get_sig_annotation_genes(sig_dwls, include_promoters = T)
+
+
+
+#### all cpgs vs gene sets ####
+
+lt2 <- list('cpgs' = c(get_sig_annotation(sig_epidish, '450k'),
+                       get_sig_annotation(sig_houseman, 'epic'),
+                       get_sig_annotation(sig_methylresolver, '450k'),
+                       sig_methylcc,
+                       get_sig_annotation(sig_methatlas,'epic')),
+            'quanTIseq'=get_sig_annotation_genes(sig_quantiseq, include_promoters = T),
+            'EPIC'=get_sig_annotation_genes(sig_epic, include_promoters = T),
+            'CIBERSORT'=get_sig_annotation_genes(sig_cibersort, include_promoters = T),
+            'DWLS'=get_sig_annotation_genes(sig_dwls, include_promoters = T))
+
+mt2 <- suppressWarnings(make_comb_mat(lt2))
+
+p_upset <- UpSet(mt2, 
+                 top_annotation = upset_top_annotation(mt2, add_numbers=T), 
+                 right_annotation = upset_right_annotation(mt2, add_numbers = T))
+
+
