@@ -1,0 +1,228 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(deconvMe)
+library(tidyverse)
+source('utils.R')
+```
+
+```{r}
+epidish_sig <- get_epidish_signature_matrix("blood")
+houseman_sig <- get_houseman_signature_matrix()
+methatlas_sig <- get_methatlas_signature_matrix()[,c(1,2,3,4,5,6,7)]
+methylresolver_sig <- get_methylresolver_signature_matrix()
+```
+
+```{r}
+meta <- readRDS('data/meta.rds')
+meth_matrix <- readRDS('data/meth.rds')
+unmeth_matrix <- readRDS('data/unmeth.rds')
+
+meth_matrix_complete <- meth_matrix[complete.cases(cbind(meth_matrix, unmeth_matrix)),]
+unmeth_matrix_complete <- unmeth_matrix[complete.cases(cbind(meth_matrix, unmeth_matrix)),]
+
+methyl_set <- minfi::MethylSet(Meth = meth_matrix_complete, 
+                               Unmeth = unmeth_matrix_complete, 
+                               preprocessMethod = 'PreprocessRaw')
+methyl_set$Sex <- meta$Gender
+beta <- deconvMe:::create_beta(methyl_set)
+facs <- readRDS('data/facs.rds')
+
+```
+
+
+
+# deconvolution with epidish
+```{r}
+epidish_baseline <- deconvMe::run_epidish(beta_matrix = beta, mode = 'RPC', maxit= 100, reference = 'blood')$estF |> 
+  data.frame(check.names = F) |> rownames_to_column('sample') |> pivot_longer(-sample, names_to = 'cell_type') |> 
+  mutate('signature'='EpiDISH', 'method'='EpiDISH')
+
+epidish_houseman <- deconvMe::run_epidish(beta_matrix = beta, mode = 'RPC', maxit= 100, reference = houseman_sig)$estF |> 
+  data.frame(check.names = F) |> rownames_to_column('sample') |> pivot_longer(-sample, names_to = 'cell_type') |> 
+  mutate('signature'='Houseman', 'method'='EpiDISH')
+
+epidish_methatlas <- deconvMe::run_epidish(beta_matrix = beta, mode = 'RPC', maxit= 100, reference = methatlas_sig)$estF |> 
+  data.frame(check.names = F) |> rownames_to_column('sample') |> pivot_longer(-sample, names_to = 'cell_type') |> 
+  mutate('signature'='MethAtlas', 'method'='EpiDISH')
+
+epidish_methylresolver <- deconvMe::run_epidish(beta_matrix = beta, mode = 'RPC', maxit= 100, reference = methylresolver_sig)$estF |> 
+  data.frame(check.names = F) |> rownames_to_column('sample') |> pivot_longer(-sample, names_to = 'cell_type') |> 
+  mutate('signature'='MethylResolver', 'method'='EpiDISH')
+
+epidish_res <- bind_rows(epidish_baseline, epidish_houseman, epidish_methatlas, epidish_methylresolver)
+```
+
+# deconvolution with MethylResolver
+```{r}
+methylresolver_baseline <- run_methylresolver(beta_matrix = beta, doPar = T, numCores = 8, alpha = 1)$result_fractions |> 
+  data.frame(check.names = F) |> rownames_to_column('sample') |> pivot_longer(-sample, names_to = 'cell_type') |> 
+  mutate('signature'='MethylResolver', 'method'='MethylResolver')
+
+methylresolver_epidish <- run_methylresolver(beta_matrix = beta, doPar = T, numCores = 8, alpha = 1, reference = epidish_sig)$result_fractions |> 
+  data.frame(check.names = F) |> rownames_to_column('sample') |> pivot_longer(-sample, names_to = 'cell_type') |> 
+  mutate('signature'='EpiDISH', 'method'='MethylResolver')
+
+methylresolver_houseman <- run_methylresolver(beta_matrix = beta, doPar = T, numCores = 8, alpha = 1, reference = houseman_sig)$result_fractions |> 
+  data.frame(check.names = F) |> rownames_to_column('sample') |> pivot_longer(-sample, names_to = 'cell_type') |> 
+  mutate('signature'='Houseman', 'method'='MethylResolver')
+
+methylresolver_methatlas <- run_methylresolver(beta_matrix = beta, doPar = T, numCores = 8, alpha = 1, reference = methatlas_sig)$result_fractions |> 
+  data.frame(check.names = F) |> rownames_to_column('sample') |> pivot_longer(-sample, names_to = 'cell_type') |> 
+  mutate('signature'='MethAtlas', 'method'='MethylResolver')
+
+methylresolver_res <- bind_rows(methylresolver_baseline, methylresolver_epidish, methylresolver_houseman, methylresolver_methatlas)
+```
+
+# deconvolution with MethAtlas
+```{r}
+methatlas_baseline <- run_methatlas(beta_matrix = beta, use_epic_reference = T) |> 
+  data.frame(check.names = F) |> rownames_to_column('sample') |> pivot_longer(-sample, names_to = 'cell_type') |> 
+  mutate('signature'='MethAtlas', 'method'='MethAtlas')
+
+methatlas_epidish <- run_methatlas(beta_matrix = beta, reference = epidish_sig) |> 
+  data.frame(check.names = F) |> rownames_to_column('sample') |> pivot_longer(-sample, names_to = 'cell_type') |> 
+  mutate('signature'='EpiDISH', 'method'='MethAtlas')
+
+methatlas_houseman <- run_methatlas(beta_matrix = beta, reference = houseman_sig) |> 
+  data.frame(check.names = F) |> rownames_to_column('sample') |> pivot_longer(-sample, names_to = 'cell_type') |> 
+  mutate('signature'='Houseman', 'method'='MethAtlas')
+
+methatlas_methatlas <- run_methatlas(beta_matrix = beta, reference = methylresolver_sig) |> 
+  data.frame(check.names = F) |> rownames_to_column('sample') |> pivot_longer(-sample, names_to = 'cell_type') |> 
+  mutate('signature'='MethylResolver', 'method'='MethAtlas')
+
+methatlas_res <- bind_rows(methatlas_baseline, methatlas_epidish, methatlas_houseman, methatlas_methatlas)
+```
+
+
+```{r}
+res <- bind_rows(methatlas_res, methylresolver_res, epidish_res)
+res$celltype_clean <- recode(res$cell_type,
+                             .default = 'other',
+                             
+                             "Mon"="Monocytes",
+                             "Dendritic"="Dendritic cells",
+                             "Macro"="Macrophages",
+                             "Neu"="Neutrophils",
+                             "Eos"="Eosinophils",
+                             "Treg"="Tregs",
+                             "Tnaive"="T cells CD4",
+                             "Tmem"="T cells CD4",     
+                             "CD8"="T cells CD8",
+                             "NK"="NK cells",
+                             "Bcell"="B cells",
+                             "B"="B cells",
+                             "CD4T"="T cells CD4",
+                             "CD8T"="T cells CD8",
+                             "Eosino"="Eosinophils",
+                             "Mono"="Monocytes",
+                             "Neutro"="Neutrophils",
+                             "Gran"="Granulocytes",
+                             "B-cells_EPIC" = "B cells",
+                             "CD4T-cells_EPIC" = "T cells CD4",
+                             "CD8T-cells_EPIC" = "T cells CD8",
+                             "Monocytes_EPIC" = "Monocytes",
+                             "Neutrophils_EPIC" = "Neutrophils",
+                             "NK-cells_EPIC" = "NK cells")
+
+res$celltype_rough <- recode(res$celltype_clean,
+                                         .default = 'other',  
+                                         
+                                         "B cells" = "B cells",
+                                         "Monocytes" = "Monocytes",
+                                         "NK cells" = "NK cells",
+                                         "T cells CD4" = "T cells CD4",
+                                         "T cells CD8" = "T cells CD8")
+
+res
+```
+
+```{r}
+ggplot(res, aes(x=method, y=value, fill=signature))+
+  geom_boxplot()+
+  facet_wrap(~celltype_rough)+
+  theme_bw()
+```
+
+
+```{r}
+facs_df <- facs %>% 
+  dplyr::select(-`OLINK ID`, -`Metabolom ID`, -`Sample_Name_transcriptomics (bulk)`, -`ID_FACS`,-`non single cells`) %>%
+  dplyr::rename('sample'=Netflid_ID) %>%
+  pivot_longer(cols = c(-sample), names_to = 'celltype') %>% 
+  mutate(method = 'FACS', value=value/100) |> 
+  subset(sample %in% unique(res$sample))
+
+facs_df$celltype_clean <- recode(facs_df$celltype,
+                                 `CD19+ (B-Zellen)` = "B cells",
+                                 `CD14+ (Monozyten)` = "Monocytes",
+                                 `MAIT Zellen` = "MAIT cells",
+                                 `gd T-Zellen` = "gd T cells",
+                                 `CD8+, CD4+` = "other",
+                                 `CD8-, CD4-` = "other",
+                                 `T- Helferzellen` = "T cells CD4",
+                                 `zytotoxische T-Zellen` = "T cells CD8",
+                                 `DCs` = "Dendritic cells",
+                                 `non DCs` = "other",
+                                 `NK bright` = "NK cells bright",
+                                 `NK dim` = "NK cells dim",
+                                 `non NK` = "other",
+                                 `non LD-` = "other",
+                                 
+                                 .default = "other"
+)
+
+facs_df$celltype_rough <- recode(facs_df$celltype,
+                                 `CD19+ (B-Zellen)` = "B cells",
+                                 `CD14+ (Monozyten)` = "Monocytes",
+                                 `T- Helferzellen` = "T cells CD4",
+                                 `zytotoxische T-Zellen` = "T cells CD8",
+                                 `NK bright` = "NK cells",
+                                 `NK dim` = "NK cells",
+                                 
+                                 .default = "other"
+)
+
+facs_df
+```
+
+```{r}
+res_full <- res |> select(celltype_rough, sample, signature, method, value) |>
+  left_join(facs_df |> select(sample, celltype_rough, value), suffix = c('','_true'), by = join_by('sample', 'celltype_rough')) |>
+  subset(celltype_rough != 'other') |>
+  unique()
+
+
+ggplot(res_full, aes(x=value_true, y=value, color=celltype_rough))+
+  geom_abline()+
+  geom_point()+
+  facet_grid(method~signature)+
+  theme_minimal()
+```
+
+```{r}
+celltype_metrics <- res_full |> 
+  group_by(celltype_rough, method, signature) |>
+  dplyr::summarize(correlation = cor.test(`value_true`, `value`)$estimate, 
+                   rmse = compute_rmse(`value_true`, `value`)) 
+
+p <- ggplot(celltype_metrics, aes(x=rmse, y=correlation, color=celltype_rough))+
+  geom_point(size=3)+
+  facet_grid(
+    rows = vars(method),
+    cols = vars(signature),
+    labeller = labeller(
+      .rows = label_both,     # adds "method: <value>" on row facet strips
+      .cols = label_both      # adds "signature: <value>" on column facet strips
+    )
+  ) +
+  scale_color_manual(values = celltype_rough_palette)+
+  theme_bw()
+
+ggsave('plots/final_versions/sig_mix.pdf', plot = p, width = 2500, height = 1600, units = 'px')
+```
+
