@@ -1,0 +1,475 @@
+---
+title: "Visualize"
+author: "Alexander Dietrich"
+date: "2025-06-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(data.table)
+library(ggpubr)
+library(circlize)
+setwd('/nfs/proj/omnideconv_benchmarking/omnideconv/deconvMe_paper/')
+```
+
+# Load results from deconvMe, omnideconv, immunedeconv
+
+```{r cars}
+res_omnideconv <- list('DWLS' = readRDS('deconv_results/omnideconv/dwls.rds'),
+                       'Scaden' = readRDS('deconv_results/omnideconv/scaden.rds'),
+                       'Bisque' = readRDS('deconv_results/omnideconv/bisque.rds'))
+
+res_immunedeconv <-  list('quanTIseq' = readRDS('deconv_results/immunedeconv/quantiseq.RDS'),
+                          'EPIC'= readRDS('deconv_results/immunedeconv/epic.RDS'),
+                          'CIBERSORT' = readRDS('deconv_results/immunedeconv/cibersort.RDS'))
+
+res_deconvMe <- list('EpiDISH' = readRDS('deconv_results/deconvMe/epidish.RDS'),
+                         'Houseman' = readRDS('deconv_results/deconvMe/houseman.RDS'),
+                         'MethAtlas' = readRDS('deconv_results/deconvMe/methatlas.RDS'),
+                         'MethylCC' = readRDS('deconv_results/deconvMe/methylcc.RDS'),
+                         'MethylResolver' = readRDS('deconv_results/deconvMe/methylresolver.RDS'))
+
+
+res_deconvMe_long <- lapply(1:length(res_deconvMe), function(i){
+  
+  df <- res_deconvMe[[i]]
+  df %>% 
+    data.frame(check.names = F) |>
+    rownames_to_column(var = 'sample') %>% 
+    pivot_longer(cols = -sample, names_to = 'celltype') %>% 
+    mutate(method = names(res_deconvMe)[i])
+})
+
+res_immunedeconv_long <- lapply(1:length(res_immunedeconv), function(i){
+  
+  df <- res_immunedeconv[[i]]
+  samples <- colnames(df)[-1]
+  quantiseq_clean <- df %>% 
+    data.table::transpose(make.names = 1) %>% 
+    mutate(sample = samples) %>%
+    pivot_longer(cols = -sample, names_to = 'celltype') %>% 
+    mutate(method = names(res_immunedeconv)[i])
+})
+
+res_omnideconv_long <- lapply(1:length(res_omnideconv), function(i){
+  
+  df <- res_omnideconv[[i]]
+  df %>% 
+    data.frame(check.names = F) |>
+    rownames_to_column(var = 'sample') %>% 
+    pivot_longer(cols = -sample, names_to = 'celltype') %>% 
+    mutate(method = names(res_omnideconv)[i])
+})
+
+res_deconv_long <- bind_rows(res_deconvMe_long, res_immunedeconv_long, res_omnideconv_long)
+
+```
+
+# Adjust/Uniform celltype names
+```{r}
+res_deconv_long$celltype_clean <- recode(res_deconv_long$celltype,
+  .default = "other",
+
+  # B cells
+  "B" = "B cells",
+  "B cell" = "B cells",
+  "B cells" = "B cells",
+  "B-cells_EPIC" = "B cells",
+  "Bcell" = "B cells",
+  "B cell naive"="B cells",
+  "B cell memory"="B cells",
+  "B cell plasma" = "B cells",
+
+  # T cells CD4
+  "CD4T" = "T cells CD4",
+  "CD4T-cells_EPIC" = "T cells CD4",
+  "T cell CD4+" = "T cells CD4",
+  "T cell CD4+ (non-regulatory)" = "T cells CD4",
+  "T cells CD4 conv" = "T cells CD4",
+  "Tnaive" = "T cells CD4",
+  "Tmem" = "T cells CD4",
+  "T cell CD4+ naive" = "T cells CD4",
+  "T cell CD4+ memory resting" = "T cells CD4",
+  "T cell CD4+ memory activated" = "T cells CD4",
+  "T cell follicular helper" = "T cells CD4",
+
+  # T cells CD8
+  "CD8" = "T cells CD8",
+  "CD8T" = "T cells CD8",
+  "CD8T-cells_EPIC" = "T cells CD8",
+  "T cell CD8+" = "T cells CD8",
+  "T cells CD8" = "T cells CD8",
+
+  # NK cells
+  "NK" = "NK cells",
+  "NK cell" = "NK cells",
+  "NK cells" = "NK cells",
+  "NK-cells_EPIC" = "NK cells",
+  "NK cell resting" = "NK cells",
+  "NK cell activated" = "NK cells",
+
+  # Tregs
+  "Treg" = "Tregs",
+  "Tregs" = "Tregs",
+  "T cell regulatory (Tregs)" = "Tregs",
+
+  # Monocytes
+  "Mono" = "Monocytes",
+  "Monocyte" = "Monocytes",
+  "Monocytes" = "Monocytes",
+  "Monocytes_EPIC" = "Monocytes",
+
+  # Macrophages
+  "Macro" = "Macrophages",
+  "Macrophage M0" = "Macrophages",
+  "Macrophage M1" = "Macrophages",
+  "Macrophage M2" = "Macrophages",
+
+  # Dendritic cells
+  "Dendritic" = "Dendritic cells",
+  "mDC" = "Dendritic cells",
+  "Myeloid dendritic cell" = "Dendritic cells",
+  "Myeloid dendritic cell resting" = "Dendritic cells",
+  "Myeloid dendritic cell activated" = "Dendritic cells",
+
+  # pDC
+  "pDC" = "Plasmacytoid dendritic cells",
+
+  # Eosinophils
+  "Eos" = "Eosinophils",
+  "Eosino" = "Eosinophils",
+  "Eosinophil" = "Eosinophils",
+
+  # Neutrophils
+  "Neu" = "Neutrophils",
+  "Neutro" = "Neutrophils",
+  "Neutrophil" = "Neutrophils",
+  "Neutrophils_EPIC" = "Neutrophils",
+
+  # Granulocytes
+  "Gran" = "Granulocytes",
+
+  # Platelets
+  "Platelet" = "Platelets",
+
+  # Plasma cells
+  "Plasma cells" = "Plasma cells",
+
+  # ILC
+  "ILC" = "Innate lymphoid cells",
+
+  # T cells (unspecified)
+  "T cells CD4 conv" = "T cells CD4",
+  "T cells CD8" = "T cells CD8",
+  "T cell gamma delta" = "gd T cells"
+)
+
+
+res_deconv_long$celltype_rough <- recode(res_deconv_long$celltype_clean,
+                                         `B cell` = "B cells",
+                                         `B cell naive` = "B cells",
+                                         `B cell memory` = "B cells",
+                                         `B cell plasma` = "B cells",
+                                         
+                                         `Monocyte` = "Monocytes",
+                                         
+                                         `NK cell` = "NK cells",
+                                         `NK cell resting` = "NK cells",
+                                         `NK cell activated` = "NK cells",
+                                         
+                                         `T cell CD4+ (non-regulatory)` = "T cells CD4",
+                                         `T cell CD4+` = "T cells CD4",
+                                         `T cell CD4+ naive` = "T cells CD4",
+                                         `T cell CD4+ memory resting` = "T cells CD4",
+                                         `T cell CD4+ memory activated` = "T cells CD4",
+                                         `T cell follicular helper` = "T cells CD4",
+                                         
+                                         `T cell CD8+` = "T cells CD8",
+                                         
+                                         .default = "other")
+
+
+res_deconv_long$celltype_rough <- recode(res_deconv_long$celltype_clean,
+                                         .default = 'other',  
+                                         
+                                         "B cells" = "B cells",
+                                         "Monocytes" = "Monocytes",
+                                         "NK cells" = "NK cells",
+                                         "T cells CD4" = "T cells CD4",
+                                         "T cells CD8" = "T cells CD8")
+```
+
+# Prepare and add ground truth
+
+```{r}
+facs <- readRDS('data/facs.rds')
+
+facs_df <- facs %>% 
+  dplyr::select(-`OLINK ID`, -`Metabolom ID`, -`Sample_Name_transcriptomics (bulk)`, -`ID_FACS`,-`non single cells`) %>%
+  dplyr::rename('sample'=Netflid_ID) %>%
+  pivot_longer(cols = c(-sample), names_to = 'celltype') %>% 
+  mutate(method = 'FACS', value=value/100)
+
+facs_df$celltype_clean <- recode(facs_df$celltype,
+                                 `CD19+ (B-Zellen)` = "B cells",
+                                 `CD14+ (Monozyten)` = "Monocytes",
+                                 `MAIT Zellen` = "MAIT cells",
+                                 `gd T-Zellen` = "gd T cells",
+                                 `CD8+, CD4+` = "other",
+                                 `CD8-, CD4-` = "other",
+                                 `T- Helferzellen` = "T cells CD4",
+                                 `zytotoxische T-Zellen` = "T cells CD8",
+                                 `DCs` = "Dendritic cells",
+                                 `non DCs` = "other",
+                                 `NK bright` = "NK cells bright",
+                                 `NK dim` = "NK cells dim",
+                                 `non NK` = "other",
+                                 `non LD-` = "other",
+                                 
+                                 .default = "other"
+)
+
+facs_df$celltype_rough <- recode(facs_df$celltype,
+                                 `CD19+ (B-Zellen)` = "B cells",
+                                 `CD14+ (Monozyten)` = "Monocytes",
+                                 `T- Helferzellen` = "T cells CD4",
+                                 `zytotoxische T-Zellen` = "T cells CD8",
+                                 `NK bright` = "NK cells",
+                                 `NK dim` = "NK cells",
+                                 
+                                 .default = "other"
+)
+
+results_df <- bind_rows(res_deconv_long, facs_df)
+
+cell_type_mapping <- unique(results_df[,c('celltype_rough', 'celltype_clean', 'celltype', 'method')])
+write.csv(cell_type_mapping, 'data/celltype_mapping.csv', row.names = F, quote = F)
+```
+
+# Scatterplot
+```{r}
+plot_df <- results_df |> dplyr::select(celltype_rough, sample, method, value) |> 
+  subset(celltype_rough != 'other') |>
+  group_by(sample, celltype_rough, method) |>
+  dplyr::summarize(value_sum = sum(value)) |>
+  pivot_wider(names_from = method, values_from = value_sum) |>
+  pivot_longer(cols = c(Bisque,CIBERSORT,DWLS,EPIC,EpiDISH,Houseman,MethAtlas,MethylCC,MethylResolver,Scaden,quanTIseq), names_to = 'method', values_to = 'estimated fraction') |>
+  dplyr::rename('true fraction' = 'FACS')
+
+plot_df$method <- factor(plot_df$method, levels = c('EpiDISH','Houseman','MethAtlas','MethylCC','MethylResolver','EPIC','quanTIseq','CIBERSORT','Bisque','DWLS','Scaden'))
+
+p <- ggplot(plot_df, aes(x=`true fraction`, y=`estimated fraction`))+
+  geom_point(size = .8, aes(color=celltype_rough))+
+  facet_wrap( ~ method, scales = 'free_y')+
+  theme_bw()+
+  geom_abline(linetype = 'dashed')+
+  stat_cor(size=2.5)+
+  theme(panel.grid = element_blank(), 
+        legend.position = 'top')+
+  scale_x_continuous(breaks = c(0, 0.2, 0.4))+
+  scale_color_manual('',values = celltype_rough_palette)+
+  guides(color = guide_legend(override.aes = list(size = 3.5)))
+
+ggsave('plots/final_versions/scatter_v2.pdf', p, width = 11, height = 7)
+```
+
+# Heatmap
+```{r}
+tmp <- results_df |> dplyr::select(celltype_rough, sample, method, value) |> 
+  subset(celltype_rough != 'other') |>
+  group_by(sample, celltype_rough, method) |>
+  dplyr::summarize(value_sum = sum(value)) |>
+  pivot_wider(names_from = method, values_from = value_sum) |>
+  pivot_longer(cols = c(Bisque,CIBERSORT,DWLS,EPIC,EpiDISH,Houseman,MethAtlas,MethylCC,MethylResolver,Scaden,quanTIseq), names_to = 'method', values_to = 'estimated fraction') |>
+  dplyr::rename('true fraction' = 'FACS') |>
+  drop_na( `estimated fraction`) 
+
+
+celltype_metrics <- tmp |> 
+  group_by(celltype_rough, method) |>
+  dplyr::summarize(correlation = cor.test(`true fraction`, `estimated fraction`)$estimate, 
+                   rmse = compute_rmse(`true fraction`, `estimated fraction`)) 
+
+global_metrics <- tmp |> 
+  group_by(method) |>
+  dplyr::summarize(correlation = cor.test(`true fraction`, `estimated fraction`)$estimate, 
+                   rmse = compute_rmse(`true fraction`, `estimated fraction`)) |>
+  dplyr::mutate(celltype_rough = 'global')
+
+metrics_df <- bind_rows(celltype_metrics, global_metrics) |> 
+  mutate(datatype = ifelse(method %in% c('quanTIseq','EPIC','CIBERSORT','Bisque','DWLS','Scaden'),'gene expression based','DNAm based'))
+metrics_df$method <- factor(metrics_df$method,levels = c('EpiDISH','Houseman','MethAtlas','MethylCC','MethylResolver','EPIC','quanTIseq','CIBERSORT','Bisque','DWLS','Scaden'))
+metrics_df$celltype_rough <- factor(metrics_df$celltype_rough, levels = c("global", "T cells CD8", "T cells CD4", "NK cells", "Dendritic cells",    "Monocytes",   "B cells"))
+
+metrics_df$y_position <- as.numeric(factor(metrics_df$celltype_rough))
+metrics_df$y_position[metrics_df$celltype_rough == "global"] <- metrics_df$y_position[metrics_df$celltype_rough == "global"] - 0.3
+
+metrics_df$x_position <- as.numeric(factor(metrics_df$method))
+
+```
+
+```{r}
+ggplot(metrics_df, aes(x=x_position, y=y_position, fill=rmse, label=round(rmse, 2)))+
+  geom_tile(aes(height = 0.95, width = 0.95))+
+  facet_grid(~datatype, scales='free')+
+  xlab('')+ylab('')+
+  scale_fill_gradient('RMSE with \nFACS ground truth', low='#1a6c9a', high = 'white', )+
+  theme_minimal()+
+  scale_y_continuous(
+    breaks = unique(metrics_df$y_position),
+    labels = unique(metrics_df$celltype_rough)
+  ) +
+  scale_x_continuous(
+    breaks = unique(metrics_df$x_position),
+    labels = unique(metrics_df$method)
+  ) +
+  theme(strip.text = element_text(size=14, face = 'bold'),
+        axis.text = element_text(size=12), axis.ticks = element_line(color='black'))+
+  geom_text(color=ifelse(metrics_df$rmse < 0.15, 'white','black'))
+
+ggplot(metrics_df, aes(x=x_position, y=y_position, fill=correlation, label=round(correlation, 2)))+
+  geom_tile(aes(height = 0.95, width = 0.95))+
+  facet_grid(~datatype, scales='free')+
+  xlab('')+ylab('')+
+  scale_fill_gradient2('Pearsons R with \nFACS ground truth', low='#b80000', high = '#1a6c9a', mid = 'white')+
+  scale_y_continuous(
+    breaks = unique(metrics_df$y_position),
+    labels = unique(metrics_df$celltype_rough)
+  ) +
+  scale_x_continuous(
+    breaks = unique(metrics_df$x_position),
+    labels = unique(metrics_df$method)
+  ) +
+  theme_minimal()+
+  theme(strip.text = element_text(size=14, face = 'bold'),
+        axis.text = element_text(size=12), axis.ticks = element_line(color='black'))+
+  geom_text(color=ifelse(metrics_df$correlation > 0.7, 'white','black'))
+```
+
+# Spider plots
+```{r}
+library(ggradar)
+library(tibble)
+
+prepare_metric_df_per_celltype <- function(df, metric, transform_fn = identity) {
+  df |>
+    select(method, celltype_rough, value = all_of(metric)) |>
+    mutate(value = transform_fn(value)) |>
+    pivot_wider(names_from = celltype_rough, values_from = value) |>
+    mutate(across(where(is.numeric), ~replace_na(.x, 0))) 
+}
+
+compute_extreme <- function(df, fun, adjust = 0) {
+  round(fun(apply(df[,-1], 2, fun), na.rm = TRUE), 1) + adjust
+}
+
+plot_radar_custom <- function(df, title, grid.min, grid.mid, grid.add, grid.max, values.radar, legend.position='none', gridline.mid.colour='grey', palette) {
+  ggradar_custom(df,
+          group.colours = palette,
+          group.point.size = 2,
+          group.line.width = .5,
+          grid.min = grid.min,
+          grid.mid = grid.mid,
+          grid.add = grid.add,
+          grid.max = grid.max,
+          values.radar = values.radar, 
+          gridline.add.colour = 'grey',
+          gridline.mid.colour = gridline.mid.colour,
+          font.radar = "sans",
+          legend.text.size = 10,
+          axis.label.size = 3.5,
+          legend.position = legend.position,
+          plot.title = title)
+}
+
+method_order <- metrics_df |> 
+  dplyr::group_by(method) |> 
+  dplyr::summarize(sum=sum(correlation, na.rm=T)) |> 
+  arrange(sum) |> 
+  select(method) |> 
+  unlist()
+
+df_rmse <- prepare_metric_df_per_celltype(metrics_df,  "rmse", function(x) log(1 / x))  |>
+  mutate(method = factor(method, levels = method_order)) |>
+  arrange(method)
+max_val <- compute_extreme(df_rmse, max, adjust = 0.1)
+plot_radar_custom(df_rmse,
+           title = paste0("log(1/RMSE) "),
+           grid.min = 0,
+           grid.mid = round(max_val * .33, 2),
+           grid.add = round(max_val * .66, 2),
+           grid.max = round(max_val, 2),
+           values.radar = c("0", 
+                            as.character(round(max_val * .33, 2)), 
+                            as.character(round(max_val * .66, 2)),
+                            as.character(round(max_val, 2))),
+           palette = method_palette[as.character(df_rmse$method)],
+           legend.position = 'left')
+
+
+df_cor <- prepare_metric_df_per_celltype(metrics_df,  "correlation")  |>
+  mutate(method = factor(method, levels = method_order)) |>
+  arrange(method)
+min_val <- compute_extreme(df_cor, min, adjust = -0.1)
+df_cor[is.na(df_cor)] <- min_val - ((1/9) * (1 - min_val))
+plot_radar_custom(df_cor,
+           title = paste0("Correlation"),
+           grid.min = ifelse(min_val < 0, min_val, 0),
+           grid.mid = ifelse(min_val < 0, 0, min_val),
+           grid.add = 0.5,
+           grid.max = 1,
+           values.radar = c(as.character(min_val), "0", "0.5", "1"),
+           gridline.mid.colour='black',
+           palette = method_palette[as.character(df_rmse$method)],
+           legend.position = 'left')
+
+
+```
+
+# Barplot
+
+```{r}
+library(ggrepel)
+
+p <- ggplot(metrics_df, aes(x = rmse, y = correlation, color = method, shape = datatype, label = method)) +
+  geom_point(size = 3.5, stroke = 1) +
+  geom_label_repel(
+    data = metrics_df |> subset(celltype_rough == 'global'),
+    size = 3,
+    max.overlaps = 20,
+    box.padding = 0.5,
+    show.legend = FALSE, 
+    force = 5
+  ) +
+  facet_wrap(~celltype_rough, ncol = 3) +
+  scale_color_manual(values = method_palette) +
+  scale_shape_manual(values = c(1,2)) +  # solid circle and triangle
+  labs(
+    x = "RMSE (lower is better)",
+    y = "Correlation (higher is better)",
+    color = "Method",
+    shape = "Data type"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major = element_line(color = "gray90"),
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(face = "bold", size = 12),
+    legend.position = "bottom",
+    legend.box = "vertical",
+    legend.title = element_text(size = 11),
+    legend.text = element_text(size = 10),
+    plot.margin = margin(10, 10, 10, 10)
+  )+
+  guides(color = guide_legend(ncol = 3, byrow = TRUE))
+
+ggsave(plot = p, device = 'pdf',filename = 'plots/final_versions/scatter_metrics.pdf', width = 3800, height = 3000, units = 'px')
+
+
+```
+
+```{r}
+p_upset
+```
+

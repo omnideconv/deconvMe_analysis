@@ -1,5 +1,5 @@
 library(immunedeconv)
-library(methyldeconv)
+library(deconvMe)
 library(tidyverse)
 library(data.table)
 library(ggpubr)
@@ -30,17 +30,17 @@ methyl_set$Sex <- meta$Gender
 
 
 
-#### Run methyldeconv ####
+#### Run deconvMe ####
 
-methylresolver <- methyldeconv::deconvolute(methyl_set = methyl_set, method = 'methylresolver', doPar = T, numCores = 8, alpha = 1) |> data.frame(check.names = F)
+methylresolver <- deconvMe::deconvolute(methyl_set = methyl_set, method = 'methylresolver', doPar = T, numCores = 8, alpha = 1) |> data.frame(check.names = F)
 
-epidish <- methyldeconv::deconvolute(methyl_set = methyl_set, method = 'epidish', reference = 'blood', maxit= 100) |> data.frame(check.names = F)
+epidish <- deconvMe::deconvolute(methyl_set = methyl_set, method = 'epidish', reference = 'blood', maxit= 100) |> data.frame(check.names = F)
 
-methylcc <- methyldeconv::deconvolute(methyl_set = methyl_set, method = 'methylcc', array = 'EPIC') |> data.frame(check.names = F)
+methylcc <- deconvMe::deconvolute(methyl_set = methyl_set, method = 'methylcc', array = 'EPIC') |> data.frame(check.names = F)
 
-houseman <- methyldeconv::deconvolute(methyl_set = methyl_set, method = 'houseman', array = 'EPIC', compositeCellType = 'Blood', referencePlatform = 'IlluminaHumanMethylationEPIC') |> data.frame(check.names = F)
+houseman <- deconvMe::deconvolute(methyl_set = methyl_set, method = 'houseman', array = 'EPIC', compositeCellType = 'Blood', referencePlatform = 'IlluminaHumanMethylationEPIC') |> data.frame(check.names = F)
 
-methatlas <- methyldeconv::deconvolute(methyl_set = methyl_set, method = 'methatlas', use_epic_reference=T) |> data.frame(check.names = F)
+methatlas <- deconvMe::deconvolute(methyl_set = methyl_set, method = 'methatlas', use_epic_reference=T) |> data.frame(check.names = F)
 
 
 #### Run immunedeconv ####
@@ -81,10 +81,10 @@ methatlas_clean <- methatlas %>%
   pivot_longer(cols = -sample, names_to = 'celltype') %>% 
   mutate(method = 'MethAtlas')
 
-methyldeconv_df <- bind_rows(methylresolver_clean, epidish_clean, methylcc_clean, houseman_clean, methatlas_clean)
+deconvMe_df <- bind_rows(methylresolver_clean, epidish_clean, methylcc_clean, houseman_clean, methatlas_clean)
 
 # clean up cell type labels
-methyldeconv_df$celltype_clean <- recode(methyldeconv_df$celltype,
+deconvMe_df$celltype_clean <- recode(deconvMe_df$celltype,
                                          .default = 'other',
                                          
                                          "Mon"="Monocytes",
@@ -112,16 +112,16 @@ methyldeconv_df$celltype_clean <- recode(methyldeconv_df$celltype,
                                          "Neutrophils_EPIC" = "Neutrophils",
                                          "NK-cells_EPIC" = "NK cells")
 
-methyldeconv_df <- methyldeconv_df |> 
+deconvMe_df <- deconvMe_df |> 
   group_by(sample, celltype_clean) |> 
   dplyr::summarize(mean_value = mean(value), .groups = 'drop') |>
   group_by(sample) |> 
   do(mutate(., value = mean_value / sum(mean_value))) |>
   ungroup() |>
   mutate(method = 'combined') |> 
-  bind_rows(methyldeconv_df) 
+  bind_rows(deconvMe_df) 
 
-methyldeconv_df$celltype_rough <- recode(methyldeconv_df$celltype_clean,
+deconvMe_df$celltype_rough <- recode(deconvMe_df$celltype_clean,
                                          .default = 'other',  
                                          
                                          "B cells" = "B cells",
@@ -259,8 +259,8 @@ facs_df$celltype_rough <- recode(facs_df$celltype,
 
 facs_df$datatype <- 'FACS'
 immunedeconv_df$datatype <- 'gene expression'
-methyldeconv_df$datatype <- 'DNAm'
-results_df <- bind_rows(immunedeconv_df, methyldeconv_df, facs_df)
+deconvMe_df$datatype <- 'DNAm'
+results_df <- bind_rows(immunedeconv_df, deconvMe_df, facs_df)
 
 results_df$method <- factor(results_df$method, levels = c('CIBERSORT','EPIC','quanTIseq','EpiDISH','Houseman','MethylCC','MethylResolver','MethAtlas','combined','FACS'))
 

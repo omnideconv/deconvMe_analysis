@@ -1,0 +1,221 @@
+---
+title: "prepare data"
+author: "Alexander Dietrich"
+date: "2025-02-06"
+output: html_document
+---
+```{r}
+library(data.table)
+library(tidyverse)
+library(readxl)
+library(tidyr)
+library(RnBeads)
+```
+
+# Metadata
+Extract metadata from full sample sheet
+```{r}
+meta <- suppressWarnings(readxl::read_xlsx('/nfs/data/NetfLID/metadata/netflid_meta_17_02_25.xlsx', skip = 1))
+meta$`Netflid-ID` <- gsub(',','_',meta$`Netflid-ID`)
+meta <- suppressWarnings(meta |> tidyr::separate(`Netflid Cohort`, c('Netflid Cohort 1','Netflid Cohort 2')))
+
+meta_a1 <- meta |> subset(`Netflid Cohort 1` == 'A1' & 
+                            !is.na(`Sample_Name_transcriptomics (bulk)`) & 
+                            !is.na(Sample_Name_epigenetics) &
+                            (!is.na(Sentrix_ID) | !is.na(Sentrix_Position)))
+
+meta_a1
+```
+
+```{r}
+meta_a1_reduced <- meta_a1[,c('Sample_Name_transcriptomics (bulk)',
+                              'Sample_Name_epigenetics',
+                              'Netflid-ID',
+                              'Sample_Group_general',
+                              'Pat_DS',
+                              'Sentrix_ID',
+                              'Sentrix_Position',
+                              'Gender')]
+
+# 123-CO433-TS is an outlier in FACS
+meta_a1_reduced <- meta_a1_reduced |> subset(`Netflid-ID` != '123-CO433-TS')
+
+fwrite(meta_a1_reduced, '/nfs/proj/omnideconv_benchmarking/omnideconv/methyldeconv_paper/netflid_metadata_a1.csv',sep = ',')
+saveRDS(meta_a1_reduced, '/nfs/data/NetfLID/methyldeconv_paper/processed_data/meta.rds')
+```
+
+
+# RNA-seq
+load RNA-seq data from nf-core RNA-seq pipeline
+```{r}
+tpm <- data.table::fread('/nfs/data/NetfLID/transcriptomics/processed/nfcore/salmon/salmon.merged.gene_tpm.tsv')
+colnames(tpm)[-c(1,2)] <- sapply(sapply(colnames(tpm)[-c(1,2)], str_split, '_'), `[[`, 1)
+tpm_aggregated <- tpm %>% as.data.frame() |>
+  dplyr::select(-gene_id) |>
+  group_by(gene_name) |>
+  dplyr::summarize(across(everything(), mean, na.rm = TRUE)) 
+tpm_matrix <- as.matrix(tpm_aggregated[,-1])
+rownames(tpm_matrix) <- tpm_aggregated$gene_name
+
+tpm_matrix_reduced <- tpm_matrix[,which(colnames(tpm_matrix) %in% meta_a1_reduced$`Sample_Name_transcriptomics (bulk)`)]
+tpm_matrix_reduced <- tpm_matrix_reduced[, order(colnames(tpm_matrix_reduced))]
+
+colnames(tpm_matrix_reduced) <- meta_a1_reduced[order(meta_a1_reduced$`Sample_Name_transcriptomics (bulk)`),]$`Netflid-ID`
+
+```
+
+```{r}
+counts <- data.table::fread('/nfs/data/NetfLID/transcriptomics/processed/nfcore/salmon/salmon.merged.gene_counts.tsv')
+colnames(counts)[-c(1,2)] <- sapply(sapply(colnames(counts)[-c(1,2)], str_split, '_'), `[[`, 1)
+counts_aggregated <- counts %>% as.data.frame() |>
+  dplyr::select(-gene_id) |>
+  group_by(gene_name) |>
+  dplyr::summarize(across(everything(), mean, na.rm = TRUE)) 
+counts_matrix <- as.matrix(counts_aggregated[,-1])
+rownames(counts_matrix) <- counts_aggregated$gene_name
+
+counts_matrix_reduced <- counts_matrix[,which(colnames(counts_matrix) %in% meta_a1_reduced$`Sample_Name_transcriptomics (bulk)`)]
+counts_matrix_reduced <- counts_matrix_reduced[, order(colnames(counts_matrix_reduced))]
+
+colnames(counts_matrix_reduced) <- meta_a1_reduced[order(meta_a1_reduced$`Sample_Name_transcriptomics (bulk)`),]$`Netflid-ID`
+
+```
+
+Overview of RNA-seq data
+```{r}
+pca <- irlba::prcomp_irlba(t(tpm_matrix_reduced), n = 5)
+pca <- summary(pca)
+
+pca_rnaseq <- data.frame(pca$x)
+pca_rnaseq$ID <- colnames(tpm_matrix_reduced)
+
+pca_rnaseq <- pca_rnaseq %>% right_join(meta_a1_reduced, by = join_by(ID == `Netflid-ID`))
+  
+p <- ggplot(pca_rnaseq, aes(x=PC1, y=PC2, color=Gender))+
+  geom_point()+
+  theme_minimal()+
+  xlab(paste0('PC1 (', pca_rnaseq$importance[2,1] * 100,'%)'))+
+  ylab(paste0('PC2 (', pca_rnaseq$importance[2,2] * 100,'%)'))+
+  scale_color_brewer(palette = 'Set1')
+
+ggsave(plot = p, device = 'pdf',filename = 'plots/PCA_RNAseq.pdf', width = 1200, height = 1000, units = 'px')
+```
+
+
+# DNA Methylation
+```{r}
+report.dir <- '/nfs/data/NetfLID/epigenetics_raw/MET_A1_methyldeconv/rnbeads_reports_v4'
+meta.file <- '/nfs/proj/omnideconv_benchmarking/omnideconv/methyldeconv_paper/netflid_metadata_a1.csv'
+parallel.setup(12)
+
+data.source <- c('/nfs/data/NetfLID/epigenetics_raw/MET_all_cohorts/',
+                 meta.file)
+
+result <- rnb.run.import(data.source = data.source,
+                       dir.reports =  report.dir)
+
+rnbs <- result$rnb.set
+
+rnb.run.qc(rnbs, report.dir)
+
+result <- rnb.run.preprocessing(rnbs, report.dir)
+rnbs <- result$rnb.set
+
+save.rnb.set(object = rnbs, path = '/nfs/data/NetfLID/epigenetics_processed/rnbeads/a1_processed')
+#rnbs <- RnBeads::load.rnb.set('/nfs/data/NetfLID/epigenetics_processed/rnbeads/a1_processed.zip')
+
+```
+
+```{r}
+mval <- t(RnBeads::mval(rnbs))
+colnames(mval) <- rownames(rnbs@sites)
+
+# use top 10% most variable features (CpGs) to calculate PCA
+ten_perc <- round(dim(mval)[2] * 0.1)
+cpg_variance <- sort(apply(mval, 2, var), decreasing = T)[1:ten_perc]
+
+mval_variable <- mval[,names(cpg_variance)]
+
+pca <- irlba::prcomp_irlba(mval_variable, n = 5)
+pca <- summary(pca)
+
+pca_dnam <- data.frame(pca$x)
+pca_dnam$ID <- rnbs@pheno$`Netflid-ID`
+
+pca_df <- pca_dnam %>% left_join(rnbs@pheno, by = join_by(ID == `Netflid-ID`))
+
+p <- ggplot(pca_df, aes(x=PC1, y=PC2, color=Gender))+
+  geom_point()+
+  theme_minimal()+
+  xlab(paste0('PC1 (', pca_df$importance[2,1] * 100,'%)'))+
+  ylab(paste0('PC2 (', pca_df$importance[2,2] * 100,'%)'))+
+  scale_color_brewer(palette = 'Set1')
+
+ggsave(plot = p, device = 'pdf',filename = 'plots/PCA_DNAm.pdf', width = 1200, height = 1000, units = 'px')
+```
+
+create a second Rnbeads version that includes the cpgs on sex chromosomes
+--> needed later for Houseman method during Genome Alignment step
+```{r}
+report.dir <- '/nfs/data/NetfLID/epigenetics_raw/MET_A1_methyldeconv/rnbeads_reports_v4.1'
+meta.file <- '/nfs/proj/omnideconv_benchmarking/omnideconv/methyldeconv_paper/netflid_metadata_a1.csv'
+parallel.setup(12)
+
+data.source <- c('/nfs/data/NetfLID/epigenetics_raw/MET_all_cohorts/',
+                 meta.file)
+
+result <- rnb.run.import(data.source = data.source,
+                       dir.reports =  report.dir)
+
+rnbs_unfiltered <- result$rnb.set
+
+rnbs_filtered <- rnb.execute.context.removal(rnbs_unfiltered)$dataset
+rnbs_filtered <- rnb.execute.snp.removal(rnbs_filtered, snp="any")$dataset
+rnbs_filtered <- rnb.execute.na.removal(rnbs_filtered)$dataset
+rnbs_filtered <- rnb.execute.variability.removal(rnbs_filtered, 0.005)$dataset
+
+save.rnb.set(object = rnbs_filtered, path = '/nfs/data/NetfLID/epigenetics_processed/rnbeads/a1_processed_withSexSites')
+#rnbs <- RnBeads::load.rnb.set('/nfs/data/NetfLID/epigenetics_processed/rnbeads/a1_processed_withSexSites.zip')
+```
+
+
+# FACS
+```{r}
+facs_df <- readxl::read_xlsx('/nfs/data/NetfLID/metadata/FACS_A1.xlsx')
+
+# remove 123-CO433-TS, sth went wrong there
+facs_df <- facs_df |> subset(`Netflid_ID` != '123-CO433-TS')
+
+```
+
+
+# Finalize datasets
+```{r}
+matched_samples <- Reduce(intersect, list(facs_df$`Netflid_ID`, rnbs_filtered@pheno$`Netflid-ID`, colnames(tpm_matrix_reduced)))
+
+meth <- RnBeads::M(rnbs_filtered)
+colnames(meth) <- rnbs_filtered@pheno$`Netflid-ID`
+rownames(meth) <- names(rnbs_filtered@sites[,1])
+unmeth <- RnBeads::U(rnbs_filtered)
+colnames(unmeth) <- rnbs_filtered@pheno$`Netflid-ID`
+rownames(unmeth) <- names(rnbs_filtered@sites[,1])
+beta <- RnBeads::meth(rnbs_filtered)
+colnames(beta) <- rnbs_filtered@pheno$`Netflid-ID`
+rownames(beta) <- names(rnbs_filtered@sites[,1])
+mavl <- RnBeads::mval(rnbs_filtered)
+colnames(mavl) <- rnbs_filtered@pheno$`Netflid-ID`
+rownames(mavl) <- names(rnbs_filtered@sites[,1])
+
+
+saveRDS(tpm_matrix_reduced[,matched_samples], '/nfs/data/NetfLID/methyldeconv_paper/processed_data/tpm.rds')
+saveRDS(counts_matrix_reduced[,matched_samples], '/nfs/data/NetfLID/methyldeconv_paper/processed_data/counts.rds')
+saveRDS(meth[,matched_samples], '/nfs/data/NetfLID/methyldeconv_paper/processed_data/meth.rds')
+saveRDS(unmeth[,matched_samples], '/nfs/data/NetfLID/methyldeconv_paper/processed_data/unmeth.rds')
+saveRDS(beta[,matched_samples], '/nfs/data/NetfLID/methyldeconv_paper/processed_data/beta.rds')
+saveRDS(mavl[,matched_samples], '/nfs/data/NetfLID/methyldeconv_paper/processed_data/mval.rds')
+saveRDS(facs_df |> subset(Netflid_ID %in% matched_samples), '/nfs/data/NetfLID/methyldeconv_paper/processed_data/facs.rds')
+
+
+```
+
+
