@@ -301,7 +301,7 @@ tmp <- results_df |> dplyr::select(celltype_rough, sample, datatype, method, val
   pivot_wider(names_from = method, values_from = value_sum) |>
   pivot_longer(cols = c(CIBERSORT,EPIC,quanTIseq,EpiDISH,Houseman,MethylCC,MethylResolver,MethAtlas,combined), names_to = 'method', values_to = 'estimated fraction') |>
   dplyr::rename('true fraction' = 'FACS') |>
-  drop_na( `estimated fraction`) 
+  drop_na(`estimated fraction`) 
 
 
 celltype_metrics <- tmp |> 

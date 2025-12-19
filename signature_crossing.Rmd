@@ -225,4 +225,42 @@ p <- ggplot(celltype_metrics, aes(x=rmse, y=correlation, color=celltype_rough))+
 
 ggsave('plots/final_versions/sig_mix.pdf', plot = p, width = 2500, height = 1600, units = 'px')
 ```
+```{r}
+default_points <- celltype_metrics %>%
+  filter(method == signature) %>%
+  select(celltype_rough, method, default_correlation = correlation, default_rmse = rmse)
+
+# Step 2: join defaults into full dataset
+comparison <- celltype_metrics %>%
+  left_join(default_points, by = c("celltype_rough", "method")) %>%
+  mutate(alpha_value = 1) %>%
+  mutate(
+    xend = 0.95 * rmse + 0.05 * default_rmse,
+    yend = 0.95 * correlation + 0.05 * default_correlation
+  )
+
+p <- ggplot()+
+  geom_segment(
+    data = comparison %>% filter(method != signature),
+    aes(x = default_rmse, y = default_correlation, xend = xend, yend = yend, color = celltype_rough),
+    arrow = arrow(length = unit(0.15, "cm")),
+    linewidth = 0.4
+  ) +
+  geom_point(data = comparison, aes(x=rmse, y=correlation, color=celltype_rough), size=2.5)+
+  geom_point(data = comparison |> filter(method != signature), aes(x=default_rmse, y=default_correlation, color=celltype_rough), shape=1, size=2.5)+
+  facet_grid(
+    rows = vars(method),
+    cols = vars(signature),
+    labeller = labeller(
+      .rows = label_both,     # adds "method: <value>" on row facet strips
+      .cols = label_both      # adds "signature: <value>" on column facet strips
+    )
+  )+
+  scale_color_manual(values = celltype_rough_palette)+
+  theme_bw()+
+  xlab('RMSE')+ylab('Pearson Correlation')
+
+ggsave('plots/final_versions/sig_mix_arrows.pdf', plot = p, width = 2500, height = 1600, units = 'px')
+```
+
 
