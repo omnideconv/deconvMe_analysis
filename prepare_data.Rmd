@@ -192,7 +192,7 @@ meta_flow <- facs_df |>
   dplyr::rename('ID'=Netflid_ID, 'timepoint'='Sample_Group_general', 'patient'='Pat_DS') |>
   pivot_longer(cols = c(-ID, -timepoint, -patient, -Gender), names_to = 'celltype_original')
 
-meta_flow$celltype_original <- sapply(meta_flow$celltype_original, function(i){gsub(', ','; ', i)})
+meta_flow$celltype_original <- sapply(meta_flow$celltype_original, function(i){gsub(', ',' ', i)})
 
 meta_flow$celltype_clean <- recode(meta_flow$celltype_original,
                                  `CD19+ (B-Zellen)` = "B cells",
